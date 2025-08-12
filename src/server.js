@@ -15,6 +15,7 @@ const projectRoutes = require('./routes/projects');
 const templateRoutes = require('./routes/templates');
 const aiRoutes = require('./routes/ai');
 const figmaRoutes = require('./routes/figma');
+const settingsRoutes = require('./routes/settings');
 
 // Import middleware
 const errorHandler = require('./middleware/errorHandler');
@@ -50,6 +51,7 @@ app.use('/api/projects', projectRoutes);
 app.use('/api/templates', templateRoutes);
 app.use('/api/ai', aiRoutes);
 app.use('/api/figma', figmaRoutes);
+app.use('/api/settings', settingsRoutes);
 
 // Health check
 app.get('/health', (req, res) => {
