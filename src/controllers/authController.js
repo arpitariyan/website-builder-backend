@@ -1,5 +1,6 @@
 // src/controllers/authController.js
 const { auth, firebaseInitialized } = require('../config/firebase');
+const User = require('../models/User');
 
 // Verify Firebase ID Token
 const verifyToken = async (req, res) => {
@@ -29,6 +30,37 @@ const verifyToken = async (req, res) => {
 
     // Verify the Firebase ID token
     const decodedToken = await auth.verifyIdToken(token);
+    
+    // Create or update user in MongoDB
+    let user = await User.findOne({ uid: decodedToken.uid });
+    if (!user) {
+      user = new User({
+        uid: decodedToken.uid,
+        email: decodedToken.email,
+        displayName: decodedToken.name || decodedToken.email,
+        photoURL: decodedToken.picture || ''
+      });
+      await user.save();
+    } else {
+      // Update user info if changed
+      let shouldUpdate = false;
+      if (user.email !== decodedToken.email) {
+        user.email = decodedToken.email;
+        shouldUpdate = true;
+      }
+      if (user.displayName !== (decodedToken.name || decodedToken.email)) {
+        user.displayName = decodedToken.name || decodedToken.email;
+        shouldUpdate = true;
+      }
+      if (user.photoURL !== (decodedToken.picture || '')) {
+        user.photoURL = decodedToken.picture || '';
+        shouldUpdate = true;
+      }
+      if (shouldUpdate) {
+        user.stats.lastActive = new Date();
+        await user.save();
+      }
+    }
     
     res.status(200).json({
       success: true,

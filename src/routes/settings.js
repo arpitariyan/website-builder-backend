@@ -1,39 +1,28 @@
 // src/routes/settings.js
-
 const express = require('express');
 const router = express.Router();
+const settingsController = require('../controllers/settingsController');
 const { authenticateToken } = require('../middleware/auth');
-const {
-  getUserSettings,
-  updateUserProfile,
-  updatePassword,
-  saveAPIKey,
-  updateCodeGenPreferences,
-  updateFigmaSettings,
-  testAPIKey,
-  getUsageStats
-} = require('../controllers/settingsController');
 
-// Get user settings
-router.get('/user', authenticateToken, getUserSettings);
+// Get user profile
+router.get('/profile', authenticateToken, settingsController.getUserProfile);
 
 // Update user profile
-router.put('/profile', authenticateToken, updateUserProfile);
+router.put('/profile', authenticateToken, settingsController.updateUserProfile);
 
-// Update password
-router.put('/password', authenticateToken, updatePassword);
+// Get user statistics
+router.get('/stats', authenticateToken, settingsController.getUserStats);
 
-// API Keys management
-router.post('/api-keys', authenticateToken, saveAPIKey);
-router.post('/api-keys/test', authenticateToken, testAPIKey);
+// Get learning data
+router.get('/learning', authenticateToken, settingsController.getLearningData);
 
-// Code generation preferences
-router.put('/code-generation', authenticateToken, updateCodeGenPreferences);
+// Clear learning data
+router.post('/learning/clear', authenticateToken, settingsController.clearLearningData);
 
-// Figma integration settings
-router.put('/figma', authenticateToken, updateFigmaSettings);
+// Export user data
+router.get('/export', authenticateToken, settingsController.exportUserData);
 
-// Usage statistics
-router.get('/usage', authenticateToken, getUsageStats);
+// Delete account
+router.delete('/account', authenticateToken, settingsController.deleteAccount);
 
 module.exports = router;

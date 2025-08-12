@@ -16,6 +16,7 @@ const templateRoutes = require('./routes/templates');
 const aiRoutes = require('./routes/ai');
 const figmaRoutes = require('./routes/figma');
 const settingsRoutes = require('./routes/settings');
+const apiKeyRoutes = require('./routes/apiKeys');
 
 // Import middleware
 const errorHandler = require('./middleware/errorHandler');
@@ -32,7 +33,11 @@ app.use(helmet({
 }));
 
 app.use(cors({
-  origin: process.env.FRONTEND_URL || 'http://localhost:5173',
+  origin: [
+    process.env.FRONTEND_URL || 'http://localhost:5173',
+    'http://localhost:5173',
+    'http://localhost:5174'
+  ],
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With']
@@ -52,6 +57,7 @@ app.use('/api/templates', templateRoutes);
 app.use('/api/ai', aiRoutes);
 app.use('/api/figma', figmaRoutes);
 app.use('/api/settings', settingsRoutes);
+app.use('/api/apikeys', apiKeyRoutes);
 
 // Health check
 app.get('/health', (req, res) => {

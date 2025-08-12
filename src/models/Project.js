@@ -24,6 +24,11 @@ const projectSchema = new mongoose.Schema({
     enum: ['draft', 'published', 'archived'],
     default: 'draft'
   },
+  visibility: {
+    type: String,
+    enum: ['private', 'public'],
+    default: 'private'
+  },
   thumbnail: {
     type: String,
     default: null
@@ -32,6 +37,21 @@ const projectSchema = new mongoose.Schema({
     type: String,
     unique: true,
     sparse: true
+  },
+  figmaData: {
+    figmaUrl: String,
+    fileKey: String,
+    nodeId: String,
+    designData: Object,
+    lastSync: Date
+  },
+  aiGeneration: {
+    provider: String,
+    model: String,
+    prompt: String,
+    generatedAt: Date,
+    tokensUsed: Number,
+    learningApplied: Boolean
   },
   content: {
     html: {
@@ -89,6 +109,31 @@ const projectSchema = new mongoose.Schema({
     timestamp: Date,
     description: String
   }],
+  debugging: {
+    errors: [{
+      message: String,
+      stack: String,
+      fixed: Boolean,
+      fixedAt: Date,
+      timestamp: Date
+    }],
+    warnings: [{
+      message: String,
+      severity: String,
+      timestamp: Date
+    }],
+    performance: {
+      buildTime: Number,
+      codeSize: Number,
+      loadTime: Number
+    }
+  },
+  analytics: {
+    views: { type: Number, default: 0 },
+    likes: { type: Number, default: 0 },
+    shares: { type: Number, default: 0 },
+    lastViewed: Date
+  },
   publishedUrl: {
     type: String,
     default: null
@@ -104,5 +149,25 @@ const projectSchema = new mongoose.Schema({
 // Index for better query performance
 projectSchema.index({ userId: 1, status: 1 });
 projectSchema.index({ subdomain: 1 });
+projectSchema.index({ visibility: 1, status: 1 });
+
+// Add method to track errors
+projectSchema.methods.addError = function(error) {
+  this.debugging.errors.push({
+    message: error.message,
+    stack: error.stack,
+    fixed: false,
+    timestamp: new Date()
+  });
+};
+
+// Add method to mark error as fixed
+projectSchema.methods.fixError = function(errorId) {
+  const error = this.debugging.errors.id(errorId);
+  if (error) {
+    error.fixed = true;
+    error.fixedAt = new Date();
+  }
+};
 
 module.exports = mongoose.model('Project', projectSchema);

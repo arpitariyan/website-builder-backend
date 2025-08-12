@@ -1,64 +1,304 @@
 // src/services/enhancedAiService.js
-// const User = require('../models/User');
-// const CodeTemplate = require('../models/CodeTemplate');
+const OpenAI = require('openai');
+const { GoogleGenerativeAI } = require('@google/generative-ai');
+const Anthropic = require('@anthropic-ai/sdk');
+const fetch = require('node-fetch');
+const User = require('../models/User');
 
 class EnhancedAiService {
   constructor() {
-    this.defaultApiKey = process.env.OPENAI_API_KEY;
+    this.providers = {
+      openai: this.callOpenAI.bind(this),
+      gemini: this.callGemini.bind(this),
+      claude: this.callClaude.bind(this),
+      openrouter: this.callOpenRouter.bind(this)
+    };
   }
 
-  // Main code generation method with intelligent fallback
-  async generateCode(prompt, userId, options = {}) {
+  async generateCode(userId, prompt, options = {}) {
     try {
-      // For now, return a simple mock response since we don't have the full models yet
-      // This prevents the server from crashing
+      const user = await User.findOne({ uid: userId });
+      if (!user) {
+        throw new Error('User not found');
+      }
+
+      // First, try to use learning patterns
+      const learningResult = await this.tryLearningPatterns(user, prompt);
+      if (learningResult && options.useLearning !== false) {
+        return {
+          code: learningResult,
+          provider: 'learning',
+          tokensUsed: 0
+        };
+      }
+
+      // Get preferred provider or fallback
+      const provider = options.provider || user.preferences?.defaultAiProvider || 'openai';
+      const apiKey = this.getUserApiKey(user, provider);
       
-      const mockCode = `// Generated code for: ${prompt}
-import React from 'react';
+      if (!apiKey) {
+        throw new Error(`No API key found for ${provider}`);
+      }
 
-const ${options.type?.charAt(0).toUpperCase() + options.type?.slice(1) || 'Component'} = () => {
-  return (
-    <div className="p-4">
-      <h2 className="text-xl font-bold mb-2">Generated Component</h2>
-      <p>This is a mock component generated from: ${prompt}</p>
-    </div>
-  );
-};
+      // Generate code using AI
+      const result = await this.callProvider(provider, apiKey, prompt, options);
+      
+      // Store learning pattern
+      if (result.code && options.component) {
+        user.addLearningPattern(options.component, result.code);
+        await user.save();
+      }
 
-export default ${options.type?.charAt(0).toUpperCase() + options.type?.slice(1) || 'Component'};`;
-
-      return {
-        success: true,
-        code: mockCode,
-        source: 'system',
-        model: 'mock-generator'
-      };
+      return result;
 
     } catch (error) {
-      console.error('Enhanced AI Service error:', error);
-      return {
-        success: false,
-        error: 'Code generation failed',
-        code: ''
-      };
+      console.error('AI generation failed:', error);
+      
+      // Try fallback providers
+      return await this.tryFallbackProviders(userId, prompt, options);
     }
   }
 
-  // Rate a generated template
-  async rateTemplate(templateId, rating, userId) {
-    try {
-      // Mock response for now
-      return { 
-        success: true, 
-        averageRating: rating 
-      };
-    } catch (error) {
-      console.error('Rating error:', error);
-      return { 
-        success: false, 
-        error: 'Failed to rate template' 
-      };
+  async tryLearningPatterns(user, prompt) {
+    const patterns = user.getLearningPatterns();
+    
+    // Simple pattern matching - in production, use more sophisticated NLP
+    const keywords = prompt.toLowerCase().split(' ');
+    
+    for (const pattern of patterns) {
+      const patternKeywords = pattern.component.toLowerCase().split(/[-_]/);
+      const matches = keywords.filter(k => patternKeywords.includes(k));
+      
+      if (matches.length > 0) {
+        // Modify the pattern based on the new requirements
+        return this.adaptPattern(pattern.code, prompt);
+      }
     }
+    
+    return null;
+  }
+
+  adaptPattern(baseCode, prompt) {
+    // Simple adaptation - replace common patterns
+    let adaptedCode = baseCode;
+    
+    // Extract colors, sizes, etc. from prompt and apply them
+    const colorMatch = prompt.match(/color[:\s]+([#\w]+)/i);
+    if (colorMatch) {
+      adaptedCode = adaptedCode.replace(/#[0-9a-fA-F]{6}/g, colorMatch[1]);
+    }
+    
+    const sizeMatch = prompt.match(/size[:\s]+(\d+)/i);
+    if (sizeMatch) {
+      adaptedCode = adaptedCode.replace(/\d+px/g, `${sizeMatch[1]}px`);
+    }
+    
+    return adaptedCode;
+  }
+
+  getUserApiKey(user, provider) {
+    const apiKeyData = user.apiKeys.find(key => key.provider === provider);
+    return apiKeyData ? user.decryptApiKey(apiKeyData.encryptedKey) : null;
+  }
+
+  async callProvider(provider, apiKey, prompt, options) {
+    const providerFunction = this.providers[provider];
+    if (!providerFunction) {
+      throw new Error(`Unsupported provider: ${provider}`);
+    }
+
+    return await providerFunction(apiKey, prompt, options);
+  }
+
+  async callOpenAI(apiKey, prompt, options = {}) {
+    const openai = new OpenAI({ apiKey });
+    
+    const model = options.model || 'gpt-4';
+    const systemPrompt = this.getSystemPrompt(options.type || 'component');
+
+    const response = await openai.chat.completions.create({
+      model,
+      messages: [
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: prompt }
+      ],
+      max_tokens: options.maxTokens || 2000,
+      temperature: 0.7
+    });
+
+    return {
+      code: this.extractCode(response.choices[0].message.content),
+      provider: 'openai',
+      model,
+      tokensUsed: response.usage.total_tokens
+    };
+  }
+
+  async callGemini(apiKey, prompt, options = {}) {
+    const genAI = new GoogleGenerativeAI(apiKey);
+    
+    const model = genAI.getGenerativeModel({ 
+      model: options.model || 'gemini-pro' 
+    });
+
+    const systemPrompt = this.getSystemPrompt(options.type || 'component');
+    const fullPrompt = `${systemPrompt}\n\n${prompt}`;
+
+    const result = await model.generateContent(fullPrompt);
+    const response = await result.response;
+
+    return {
+      code: this.extractCode(response.text()),
+      provider: 'gemini',
+      model: options.model || 'gemini-pro',
+      tokensUsed: response.text().length // Approximate
+    };
+  }
+
+  async callClaude(apiKey, prompt, options = {}) {
+    const anthropic = new Anthropic({ apiKey });
+    
+    const model = options.model || 'claude-3-sonnet-20240229';
+    const systemPrompt = this.getSystemPrompt(options.type || 'component');
+
+    const response = await anthropic.messages.create({
+      model,
+      max_tokens: options.maxTokens || 2000,
+      system: systemPrompt,
+      messages: [
+        { role: 'user', content: prompt }
+      ]
+    });
+
+    return {
+      code: this.extractCode(response.content[0].text),
+      provider: 'claude',
+      model,
+      tokensUsed: response.usage.input_tokens + response.usage.output_tokens
+    };
+  }
+
+  async callOpenRouter(apiKey, prompt, options = {}) {
+    const model = options.model || 'openai/gpt-4';
+    const systemPrompt = this.getSystemPrompt(options.type || 'component');
+
+    const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${apiKey}`,
+        'Content-Type': 'application/json',
+        'HTTP-Referer': process.env.APP_URL || 'http://localhost:3000',
+        'X-Title': 'Website Builder AI'
+      },
+      body: JSON.stringify({
+        model,
+        messages: [
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: prompt }
+        ],
+        max_tokens: options.maxTokens || 2000,
+        temperature: 0.7
+      })
+    });
+
+    const data = await response.json();
+
+    return {
+      code: this.extractCode(data.choices[0].message.content),
+      provider: 'openrouter',
+      model,
+      tokensUsed: data.usage?.total_tokens || 0
+    };
+  }
+
+  async tryFallbackProviders(userId, prompt, options) {
+    const user = await User.findOne({ uid: userId });
+    const availableProviders = user.apiKeys.map(key => key.provider);
+    
+    for (const provider of availableProviders) {
+      if (provider !== options.provider) {
+        try {
+          const apiKey = this.getUserApiKey(user, provider);
+          return await this.callProvider(provider, apiKey, prompt, { ...options, provider });
+        } catch (error) {
+          console.error(`Fallback provider ${provider} failed:`, error);
+          continue;
+        }
+      }
+    }
+    
+    throw new Error('All AI providers failed');
+  }
+
+  getSystemPrompt(type) {
+    const prompts = {
+      component: `You are an expert React developer and UI designer. Generate clean, modern, and responsive React components using Tailwind CSS. 
+      
+Rules:
+- Return only the JSX code wrapped in a React component
+- Use Tailwind CSS for styling
+- Make components responsive and accessible
+- Include proper TypeScript types if requested
+- Use modern React patterns (hooks, functional components)
+- Ensure code is production-ready and follows best practices`,
+
+      page: `You are an expert web developer. Generate complete, responsive web pages using React and Tailwind CSS.
+
+Rules:
+- Create full page layouts with proper structure
+- Use semantic HTML elements
+- Implement responsive design principles
+- Include proper SEO meta tags
+- Use modern CSS Grid and Flexbox layouts
+- Ensure accessibility compliance`,
+
+      style: `You are a CSS expert specializing in Tailwind CSS. Generate clean, efficient styling solutions.
+
+Rules:
+- Use Tailwind utility classes
+- Ensure responsive design
+- Follow design system principles
+- Optimize for performance
+- Use modern CSS features appropriately`
+    };
+
+    return prompts[type] || prompts.component;
+  }
+
+  extractCode(content) {
+    // Extract code from markdown code blocks
+    const codeBlockRegex = /```(?:jsx?|tsx?|html|css)?\n?([\s\S]*?)```/;
+    const match = content.match(codeBlockRegex);
+    
+    if (match) {
+      return match[1].trim();
+    }
+    
+    // If no code block found, return the content as is
+    return content.trim();
+  }
+
+  async debugCode(code, error) {
+    // Simple debugging rules
+    const fixes = {
+      'ReferenceError': () => {
+        // Add missing imports
+        if (!code.includes('import React')) {
+          return `import React from 'react';\n${code}`;
+        }
+        return code;
+      },
+      'SyntaxError': () => {
+        // Fix common syntax issues
+        return code
+          .replace(/className=/g, 'className=')
+          .replace(/class=/g, 'className=')
+          .replace(/;/g, '');
+      }
+    };
+
+    const fix = fixes[error.name];
+    return fix ? fix() : code;
   }
 
   // Get user's code generation history
