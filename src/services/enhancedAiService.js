@@ -15,6 +15,207 @@ class EnhancedAiService {
     };
   }
 
+  async generateProjectAnalysis(userId, projectData) {
+    try {
+      const user = await User.findOne({ uid: userId });
+      if (!user) {
+        throw new Error('User not found');
+      }
+
+      const provider = user.preferences?.defaultAiProvider || 'openai';
+      const apiKey = this.getUserApiKey(user, provider);
+      
+      if (!apiKey) {
+        throw new Error(`No API key found for ${provider}`);
+      }
+
+      const analysisPrompt = this.buildProjectAnalysisPrompt(projectData);
+      
+      const result = await this.callProvider(provider, apiKey, analysisPrompt, {
+        type: 'analysis',
+        maxTokens: 2000
+      });
+
+      return {
+        analysis: this.parseAnalysisResult(result.content),
+        prompt: this.generateDevelopmentPrompt(projectData, result.content),
+        provider: result.provider,
+        tokensUsed: result.tokensUsed
+      };
+    } catch (error) {
+      console.error('Project analysis failed:', error);
+      throw error;
+    }
+  }
+
+  buildProjectAnalysisPrompt(data) {
+    let prompt = `Please analyze this web development project and provide a comprehensive development plan.
+
+Project Details:
+- Name: ${data.name}
+- Description: ${data.description}
+- Category: ${data.category}
+- Backend Required: ${data.backendRequired ? 'Yes' : 'No'}
+
+`;
+
+    if (data.uploadedContent) {
+      prompt += `Additional Documentation:
+${data.uploadedContent}
+
+`;
+    }
+
+    if (data.figmaData) {
+      prompt += `Design Information:
+- Figma design is available with detailed mockups
+`;
+      if (data.figmaFlows && data.figmaFlows.length > 0) {
+        prompt += `- Design flows analyzed: ${data.figmaFlows.map(f => f.flowName).join(', ')}
+`;
+      }
+      prompt += '\n';
+    }
+
+    prompt += `Please provide:
+1. Technical architecture recommendation
+2. Key features and functionality to implement
+3. Technology stack suggestions (React, Vue, Angular, etc.)
+4. UI/UX considerations
+5. Development timeline estimate
+6. Potential challenges and solutions
+
+Format your response as a structured analysis.`;
+
+    return prompt;
+  }
+
+  parseAnalysisResult(content) {
+    try {
+      // Extract structured information from AI response
+      const analysis = {
+        architecture: this.extractSection(content, 'architecture'),
+        features: this.extractSection(content, 'features'),
+        techStack: this.extractSection(content, 'technology|tech stack'),
+        uiUx: this.extractSection(content, 'ui/ux|design'),
+        timeline: this.extractSection(content, 'timeline'),
+        challenges: this.extractSection(content, 'challenges')
+      };
+
+      return analysis;
+    } catch (error) {
+      console.warn('Failed to parse analysis result:', error);
+      return { raw: content };
+    }
+  }
+
+  extractSection(content, sectionPattern) {
+    const regex = new RegExp(`(?:^|\\n)\\d*\\.?\\s*(?:${sectionPattern})[:\\s]*([\\s\\S]*?)(?=\\n\\d+\\.|\\n[A-Z]|$)`, 'im');
+    const match = content.match(regex);
+    return match ? match[1].trim() : '';
+  }
+
+  generateDevelopmentPrompt(projectData, analysisContent) {
+    let prompt = `Create a ${projectData.backendRequired ? 'full-stack' : 'frontend'} web application with the following specifications:
+
+Project: ${projectData.name}
+Category: ${projectData.category}
+
+Requirements:
+${projectData.description}
+
+`;
+
+    if (projectData.uploadedContent) {
+      prompt += `Additional Context:
+${projectData.uploadedContent}
+
+`;
+    }
+
+    if (analysisContent) {
+      prompt += `Development Analysis:
+${analysisContent}
+
+`;
+    }
+
+    const techStack = this.getTechStackForCategory(projectData.category, projectData.backendRequired);
+    
+    prompt += `Technical Requirements:
+- Use ${techStack.frontend} for the frontend
+`;
+
+    if (projectData.backendRequired) {
+      prompt += `- Use ${techStack.backend} for the backend
+- Include database integration
+- Implement authentication if needed
+`;
+    }
+
+    prompt += `- Ensure responsive design for all screen sizes
+- Follow modern web development best practices
+- Include proper error handling
+- Optimize for performance
+
+`;
+
+    if (projectData.figmaData) {
+      prompt += `Design Requirements:
+- Follow the provided Figma design closely
+- Maintain design consistency across all components
+- Implement interactive elements as shown in the design
+`;
+      
+      if (projectData.figmaFlows) {
+        prompt += `- Implement the following user flows: ${projectData.figmaFlows.map(f => f.flowName).join(', ')}
+`;
+      }
+      prompt += '\n';
+    }
+
+    prompt += `Output Requirements:
+- Provide complete, production-ready code
+- Include proper file structure
+- Add comprehensive comments
+- Ensure code is modular and maintainable
+
+Generate the complete application code now.`;
+
+    return prompt;
+  }
+
+  getTechStackForCategory(category, backendRequired) {
+    const stacks = {
+      'portfolio': {
+        frontend: 'React with Tailwind CSS',
+        backend: 'Node.js with Express'
+      },
+      'landing-page': {
+        frontend: 'React with Tailwind CSS',
+        backend: 'Node.js with Express'
+      },
+      'e-commerce': {
+        frontend: 'React with Tailwind CSS and Redux',
+        backend: 'Node.js with Express and MongoDB'
+      },
+      'business': {
+        frontend: 'React with Tailwind CSS',
+        backend: 'Node.js with Express and MongoDB'
+      },
+      'blog': {
+        frontend: 'React with Tailwind CSS',
+        backend: 'Node.js with Express and MongoDB'
+      },
+      'other': {
+        frontend: 'React with Tailwind CSS',
+        backend: 'Node.js with Express'
+      }
+    };
+
+    return stacks[category] || stacks.other;
+  }
+
   async generateCode(userId, prompt, options = {}) {
     try {
       const user = await User.findOne({ uid: userId });

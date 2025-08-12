@@ -19,9 +19,18 @@ const projectSchema = new mongoose.Schema({
     type: String,
     default: null
   },
+  category: {
+    type: String,
+    enum: ['portfolio', 'landing-page', 'e-commerce', 'business', 'blog', 'other'],
+    default: 'other'
+  },
+  backendRequired: {
+    type: Boolean,
+    default: false
+  },
   status: {
     type: String,
-    enum: ['draft', 'published', 'archived'],
+    enum: ['draft', 'analyzing', 'ready', 'generating', 'published', 'archived'],
     default: 'draft'
   },
   visibility: {
@@ -38,12 +47,33 @@ const projectSchema = new mongoose.Schema({
     unique: true,
     sparse: true
   },
+  uploadedFiles: [{
+    filename: String,
+    originalName: String,
+    mimetype: String,
+    size: Number,
+    path: String,
+    parsedContent: String,
+    uploadedAt: { type: Date, default: Date.now }
+  }],
   figmaData: {
     figmaUrl: String,
     fileKey: String,
     nodeId: String,
     designData: Object,
+    flowAnalysis: [{
+      flowName: String,
+      screens: [Object],
+      connections: [Object]
+    }],
     lastSync: Date
+  },
+  aiAnalysis: {
+    prompt: String,
+    generatedPrompt: String,
+    analysisData: Object,
+    lastGenerated: Date,
+    version: { type: Number, default: 1 }
   },
   aiGeneration: {
     provider: String,

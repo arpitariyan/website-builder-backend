@@ -12,6 +12,7 @@ const connectDB = require('./config/database');
 // Import routes
 const authRoutes = require('./routes/auth');
 const projectRoutes = require('./routes/projects');
+const enhancedProjectRoutes = require('./routes/enhancedProjects');
 const templateRoutes = require('./routes/templates');
 const aiRoutes = require('./routes/ai');
 const figmaRoutes = require('./routes/figma');
@@ -53,6 +54,7 @@ app.use('/uploads', express.static(path.join(__dirname, '../uploads')));
 // Routes
 app.use('/api/auth', authRoutes);
 app.use('/api/projects', projectRoutes);
+app.use('/api/projects/enhanced', enhancedProjectRoutes);
 app.use('/api/templates', templateRoutes);
 app.use('/api/ai', aiRoutes);
 app.use('/api/figma', figmaRoutes);
