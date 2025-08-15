@@ -369,6 +369,194 @@ const getProjectDetails = async (req, res) => {
   }
 };
 
+// Enhanced save project content with optional file system persistence
+const saveProjectContent = async (req, res) => {
+  try {
+    const { projectId } = req.params;
+    const userId = req.user.uid;
+    const { content, saveToFileSystem = false } = req.body;
+
+    const project = await Project.findById(projectId);
+    if (!project || project.userId !== userId) {
+      return res.status(404).json({ error: 'Project not found' });
+    }
+
+    // Update project content in database
+    await Project.findByIdAndUpdate(projectId, {
+      content: content,
+      lastSaved: new Date()
+    });
+
+    // Optionally save to file system
+    if (saveToFileSystem) {
+      await saveContentToFileSystem(projectId, content);
+    }
+
+    res.json({ 
+      success: true, 
+      message: 'Project content saved successfully',
+      savedToFileSystem: saveToFileSystem
+    });
+  } catch (error) {
+    console.error('Error saving project content:', error);
+    res.status(500).json({ 
+      error: 'Failed to save project content',
+      details: error.message 
+    });
+  }
+};
+
+// Save individual file content
+const saveFileContent = async (req, res) => {
+  try {
+    const { projectId } = req.params;
+    const userId = req.user.uid;
+    const { fileName, content, saveToFileSystem = false } = req.body;
+
+    const project = await Project.findById(projectId);
+    if (!project || project.userId !== userId) {
+      return res.status(404).json({ error: 'Project not found' });
+    }
+
+    // Update specific file content in database
+    const updatedContent = {
+      ...project.content,
+      [fileName]: content
+    };
+
+    await Project.findByIdAndUpdate(projectId, {
+      content: updatedContent,
+      lastSaved: new Date()
+    });
+
+    // Optionally save to file system
+    if (saveToFileSystem) {
+      await saveFileToFileSystem(projectId, fileName, content);
+    }
+
+    res.json({ 
+      success: true, 
+      message: 'File saved successfully',
+      fileName,
+      savedToFileSystem: saveToFileSystem
+    });
+  } catch (error) {
+    console.error('Error saving file:', error);
+    res.status(500).json({ 
+      error: 'Failed to save file',
+      details: error.message 
+    });
+  }
+};
+
+// Helper function to save content to file system
+const saveContentToFileSystem = async (projectId, content) => {
+  const projectDir = path.join(__dirname, '../../storage/builds', projectId);
+  await fs.mkdir(projectDir, { recursive: true });
+
+  // Save each file to the file system
+  for (const [fileName, fileContent] of Object.entries(content)) {
+    const filePath = path.join(projectDir, fileName);
+    const fileDir = path.dirname(filePath);
+    await fs.mkdir(fileDir, { recursive: true });
+    await fs.writeFile(filePath, fileContent, 'utf8');
+  }
+};
+
+// Helper function to save individual file to file system
+const saveFileToFileSystem = async (projectId, fileName, content) => {
+  const projectDir = path.join(__dirname, '../../storage/builds', projectId);
+  const filePath = path.join(projectDir, fileName);
+  const fileDir = path.dirname(filePath);
+  
+  await fs.mkdir(fileDir, { recursive: true });
+  await fs.writeFile(filePath, content, 'utf8');
+};
+
+// Get preview URL for project
+const getPreviewUrl = async (req, res) => {
+  try {
+    const { projectId } = req.params;
+    const userId = req.user.uid;
+
+    const project = await Project.findById(projectId);
+    if (!project || project.userId !== userId) {
+      return res.status(404).json({ error: 'Project not found' });
+    }
+
+    // Check if project has been saved to file system
+    const projectDir = path.join(__dirname, '../../storage/builds', projectId);
+    const indexPath = path.join(projectDir, 'index.html');
+    
+    try {
+      await fs.access(indexPath);
+      const previewUrl = `${req.protocol}://${req.get('host')}/api/projects/${projectId}/preview`;
+      const livePreviewUrl = `${req.protocol}://${req.get('host')}/api/projects/${projectId}/live-preview`;
+      
+      res.json({
+        success: true,
+        previewUrl,
+        livePreviewUrl,
+        hasFileSystem: true
+      });
+    } catch {
+      res.json({
+        success: true,
+        previewUrl: null,
+        livePreviewUrl: null,
+        hasFileSystem: false,
+        message: 'Project not saved to file system yet'
+      });
+    }
+  } catch (error) {
+    console.error('Error getting preview URL:', error);
+    res.status(500).json({ 
+      error: 'Failed to get preview URL',
+      details: error.message 
+    });
+  }
+};
+
+// Serve static preview
+const servePreview = async (req, res) => {
+  try {
+    const { projectId } = req.params;
+    const { '*': filePath = 'index.html' } = req.params;
+
+    const projectDir = path.join(__dirname, '../../storage/builds', projectId);
+    const requestedFile = path.join(projectDir, filePath);
+
+    // Security check to prevent directory traversal
+    if (!requestedFile.startsWith(projectDir)) {
+      return res.status(403).json({ error: 'Access denied' });
+    }
+
+    try {
+      const content = await fs.readFile(requestedFile, 'utf8');
+      
+      // Set appropriate content type
+      const ext = path.extname(filePath);
+      const contentTypes = {
+        '.html': 'text/html',
+        '.css': 'text/css',
+        '.js': 'application/javascript',
+        '.json': 'application/json'
+      };
+      
+      res.set('Content-Type', contentTypes[ext] || 'text/plain');
+      res.send(content);
+    } catch (error) {
+      res.status(404).json({ error: 'File not found' });
+    }
+  } catch (error) {
+    console.error('Error serving preview:', error);
+    res.status(500).json({ 
+      error: 'Failed to serve preview',
+      details: error.message 
+    });
+  }
+};
+
 const updateProjectDetails = async (req, res) => {
   try {
     const { projectId } = req.params;
@@ -412,5 +600,9 @@ module.exports = {
   generateAIAnalysis,
   generateCode,
   getProjectDetails,
-  updateProjectDetails
+  updateProjectDetails,
+  saveProjectContent,
+  saveFileContent,
+  getPreviewUrl,
+  servePreview
 };

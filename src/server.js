@@ -4,10 +4,14 @@ const cors = require('cors');
 const helmet = require('helmet');
 const morgan = require('morgan');
 const path = require('path');
+const http = require('http');
 require('dotenv').config();
 
 // Import database connection
 const connectDB = require('./config/database');
+
+// Import services
+const socketService = require('./services/socketService');
 
 // Import routes
 const authRoutes = require('./routes/auth');
@@ -23,10 +27,14 @@ const apiKeyRoutes = require('./routes/apiKeys');
 const errorHandler = require('./middleware/errorHandler');
 
 const app = express();
+const server = http.createServer(app);
 const PORT = process.env.PORT || 5000;
 
 // Connect to MongoDB
 connectDB();
+
+// Initialize WebSocket service
+socketService.initialize(server);
 
 // Middleware
 app.use(helmet({
@@ -67,7 +75,8 @@ app.get('/health', (req, res) => {
     status: 'OK', 
     timestamp: new Date().toISOString(),
     environment: process.env.NODE_ENV,
-    version: '1.0.0'
+    version: '1.0.0',
+    socketConnections: socketService.getStats().totalConnections
   });
 });
 
@@ -82,8 +91,11 @@ app.use('*', (req, res) => {
 // Error handling
 app.use(errorHandler);
 
-app.listen(PORT, () => {
+server.listen(PORT, () => {
   console.log(`🚀 Server running on port ${PORT}`);
   console.log(`📊 Environment: ${process.env.NODE_ENV}`);
   console.log(`🌐 Frontend URL: ${process.env.FRONTEND_URL}`);
+  console.log(`🔌 WebSocket service initialized`);
 });
+
+module.exports = { app, server };

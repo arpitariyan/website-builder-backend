@@ -2,6 +2,8 @@
 const Project = require('../models/Project');
 const User = require('../models/User');
 const enhancedAiService = require('../services/enhancedAiService');
+const aiOrchestrator = require('../services/aiOrchestrator');
+const terminalService = require('../services/terminalService');
 const figmaService = require('../services/figmaService');
 const multer = require('multer');
 const path = require('path');
@@ -406,11 +408,586 @@ const updateProjectDetails = async (req, res) => {
   }
 };
 
+// AI-powered live code generation
+const generateLiveCode = async (req, res) => {
+  try {
+    const { projectId } = req.params;
+    const { component, description, type = 'full-project' } = req.body;
+    const userId = req.user.uid;
+
+    const project = await Project.findOne({ _id: projectId, userId });
+    if (!project) {
+      return res.status(404).json({ error: 'Project not found' });
+    }
+
+    // Use AI Orchestrator for intelligent code generation
+    const result = await aiOrchestrator.generateCode(userId, project, {
+      type,
+      component,
+      description,
+      stack: project.frontendTech || 'react',
+      category: project.category
+    });
+
+    // Initialize workspace with generated files
+    if (result.files) {
+      await terminalService.initializeWorkspace(projectId, result.files);
+      
+      // Update project with generated content
+      project.content = result.files;
+      project.status = 'ready';
+      project.lastAiGeneration = {
+        timestamp: new Date(),
+        provider: result.provider,
+        tokensUsed: result.tokensUsed,
+        source: result.source
+      };
+      await project.save();
+    }
+
+    res.json({
+      success: true,
+      files: result.files,
+      metadata: {
+        provider: result.provider,
+        tokensUsed: result.tokensUsed,
+        source: result.source,
+        timestamp: new Date()
+      }
+    });
+  } catch (error) {
+    console.error('Error generating live code:', error);
+    res.status(500).json({ 
+      error: 'Failed to generate code',
+      details: error.message 
+    });
+  }
+};
+
+// Terminal management endpoints
+const createTerminal = async (req, res) => {
+  try {
+    const { projectId } = req.params;
+    const { initialPath } = req.body;
+    const userId = req.user.uid;
+
+    const project = await Project.findOne({ _id: projectId, userId });
+    if (!project) {
+      return res.status(404).json({ error: 'Project not found' });
+    }
+
+    const terminal = terminalService.createTerminal(projectId, userId, initialPath);
+    
+    res.json({
+      success: true,
+      terminal
+    });
+  } catch (error) {
+    console.error('Error creating terminal:', error);
+    res.status(500).json({ 
+      error: 'Failed to create terminal',
+      details: error.message 
+    });
+  }
+};
+
+const executeTerminalCommand = async (req, res) => {
+  try {
+    const { terminalId } = req.params;
+    const { command } = req.body;
+    
+    terminalService.executeCommand(terminalId, command);
+    
+    res.json({
+      success: true,
+      message: 'Command executed'
+    });
+  } catch (error) {
+    console.error('Error executing command:', error);
+    res.status(500).json({ 
+      error: 'Failed to execute command',
+      details: error.message 
+    });
+  }
+};
+
+const getTerminalOutput = async (req, res) => {
+  try {
+    const { terminalId } = req.params;
+    const { lines = 100 } = req.query;
+    
+    const output = terminalService.getTerminalOutput(terminalId, parseInt(lines));
+    
+    res.json({
+      success: true,
+      output
+    });
+  } catch (error) {
+    console.error('Error getting terminal output:', error);
+    res.status(500).json({ 
+      error: 'Failed to get terminal output',
+      details: error.message 
+    });
+  }
+};
+
+// File system management
+const getWorkspaceTree = async (req, res) => {
+  try {
+    const { projectId } = req.params;
+    const userId = req.user.uid;
+
+    const project = await Project.findOne({ _id: projectId, userId });
+    if (!project) {
+      return res.status(404).json({ error: 'Project not found' });
+    }
+
+    const tree = await terminalService.getWorkspaceTree(projectId);
+    
+    res.json({
+      success: true,
+      tree
+    });
+  } catch (error) {
+    console.error('Error getting workspace tree:', error);
+    res.status(500).json({ 
+      error: 'Failed to get workspace tree',
+      details: error.message 
+    });
+  }
+};
+
+const readWorkspaceFile = async (req, res) => {
+  try {
+    const { projectId } = req.params;
+    const { filePath } = req.query;
+    const userId = req.user.uid;
+
+    const project = await Project.findOne({ _id: projectId, userId });
+    if (!project) {
+      return res.status(404).json({ error: 'Project not found' });
+    }
+
+    const file = await terminalService.readWorkspaceFile(projectId, filePath);
+    
+    res.json({
+      success: true,
+      file
+    });
+  } catch (error) {
+    console.error('Error reading file:', error);
+    res.status(500).json({ 
+      error: 'Failed to read file',
+      details: error.message 
+    });
+  }
+};
+
+const writeWorkspaceFile = async (req, res) => {
+  try {
+    const { projectId } = req.params;
+    const { filePath, content } = req.body;
+    const userId = req.user.uid;
+
+    const project = await Project.findOne({ _id: projectId, userId });
+    if (!project) {
+      return res.status(404).json({ error: 'Project not found' });
+    }
+
+    await terminalService.writeWorkspaceFile(projectId, filePath, content);
+    
+    // Update project content in database
+    if (!project.content) project.content = {};
+    project.content[filePath] = { content, language: 'javascript' };
+    await project.save();
+    
+    res.json({
+      success: true,
+      message: 'File saved successfully'
+    });
+  } catch (error) {
+    console.error('Error writing file:', error);
+    res.status(500).json({ 
+      error: 'Failed to write file',
+      details: error.message 
+    });
+  }
+};
+
+const deleteWorkspaceFile = async (req, res) => {
+  try {
+    const { projectId } = req.params;
+    const { filePath } = req.body;
+    const userId = req.user.uid;
+
+    const project = await Project.findOne({ _id: projectId, userId });
+    if (!project) {
+      return res.status(404).json({ error: 'Project not found' });
+    }
+
+    await terminalService.deleteWorkspaceFile(projectId, filePath);
+    
+    // Remove from project content
+    if (project.content && project.content[filePath]) {
+      delete project.content[filePath];
+      await project.save();
+    }
+    
+    res.json({
+      success: true,
+      message: 'File deleted successfully'
+    });
+  } catch (error) {
+    console.error('Error deleting file:', error);
+    res.status(500).json({ 
+      error: 'Failed to delete file',
+      details: error.message 
+    });
+  }
+};
+
+const createWorkspaceDirectory = async (req, res) => {
+  try {
+    const { projectId } = req.params;
+    const { dirPath } = req.body;
+    const userId = req.user.uid;
+
+    const project = await Project.findOne({ _id: projectId, userId });
+    if (!project) {
+      return res.status(404).json({ error: 'Project not found' });
+    }
+
+    await terminalService.createWorkspaceDirectory(projectId, dirPath);
+    
+    res.json({
+      success: true,
+      message: 'Directory created successfully'
+    });
+  } catch (error) {
+    console.error('Error creating directory:', error);
+    res.status(500).json({ 
+      error: 'Failed to create directory',
+      details: error.message 
+    });
+  }
+};
+
+// Package management
+const installPackages = async (req, res) => {
+  try {
+    const { projectId } = req.params;
+    const { packages, isDevDependency = false } = req.body;
+    const userId = req.user.uid;
+
+    const project = await Project.findOne({ _id: projectId, userId });
+    if (!project) {
+      return res.status(404).json({ error: 'Project not found' });
+    }
+
+    const result = await terminalService.installPackages(projectId, packages, isDevDependency);
+    
+    res.json({
+      success: true,
+      terminalId: result.terminalId,
+      command: result.command
+    });
+  } catch (error) {
+    console.error('Error installing packages:', error);
+    res.status(500).json({ 
+      error: 'Failed to install packages',
+      details: error.message 
+    });
+  }
+};
+
+// Build and deployment
+const runBuild = async (req, res) => {
+  try {
+    const { projectId } = req.params;
+    const userId = req.user.uid;
+
+    const project = await Project.findOne({ _id: projectId, userId });
+    if (!project) {
+      return res.status(404).json({ error: 'Project not found' });
+    }
+
+    const result = await terminalService.runBuild(projectId);
+    
+    res.json({
+      success: true,
+      terminalId: result.terminalId
+    });
+  } catch (error) {
+    console.error('Error running build:', error);
+    res.status(500).json({ 
+      error: 'Failed to run build',
+      details: error.message 
+    });
+  }
+};
+
+const runDevServer = async (req, res) => {
+  try {
+    const { projectId } = req.params;
+    const userId = req.user.uid;
+
+    const project = await Project.findOne({ _id: projectId, userId });
+    if (!project) {
+      return res.status(404).json({ error: 'Project not found' });
+    }
+
+    const result = await terminalService.runDevServer(projectId);
+    
+    res.json({
+      success: true,
+      terminalId: result.terminalId
+    });
+  } catch (error) {
+    console.error('Error running dev server:', error);
+    res.status(500).json({ 
+      error: 'Failed to run dev server',
+      details: error.message 
+    });
+  }
+};
+
+// AI Knowledge Base endpoints
+const getKnowledgeStats = async (req, res) => {
+  try {
+    const userId = req.user.uid;
+    
+    const stats = await aiOrchestrator.getKnowledgeStats(userId);
+    
+    res.json({
+      success: true,
+      stats
+    });
+  } catch (error) {
+    console.error('Error getting knowledge stats:', error);
+    res.status(500).json({ 
+      error: 'Failed to get knowledge stats',
+      details: error.message 
+    });
+  }
+};
+
+// Enhanced save project content with optional file system persistence
+const saveProjectContent = async (req, res) => {
+  try {
+    const { projectId } = req.params;
+    const userId = req.user.uid;
+    const { content, saveToFileSystem = false } = req.body;
+
+    const project = await Project.findById(projectId);
+    if (!project || project.userId !== userId) {
+      return res.status(404).json({ error: 'Project not found' });
+    }
+
+    // Update project content in database
+    await Project.findByIdAndUpdate(projectId, {
+      content: content,
+      lastSaved: new Date()
+    });
+
+    // Optionally save to file system
+    if (saveToFileSystem) {
+      await saveContentToFileSystem(projectId, content);
+    }
+
+    res.json({ 
+      success: true, 
+      message: 'Project content saved successfully',
+      savedToFileSystem: saveToFileSystem
+    });
+  } catch (error) {
+    console.error('Error saving project content:', error);
+    res.status(500).json({ 
+      error: 'Failed to save project content',
+      details: error.message 
+    });
+  }
+};
+
+// Save individual file content
+const saveFileContent = async (req, res) => {
+  try {
+    const { projectId } = req.params;
+    const userId = req.user.uid;
+    const { fileName, content, saveToFileSystem = false } = req.body;
+
+    const project = await Project.findById(projectId);
+    if (!project || project.userId !== userId) {
+      return res.status(404).json({ error: 'Project not found' });
+    }
+
+    // Update specific file content in database
+    const updatedContent = {
+      ...project.content,
+      [fileName]: content
+    };
+
+    await Project.findByIdAndUpdate(projectId, {
+      content: updatedContent,
+      lastSaved: new Date()
+    });
+
+    // Optionally save to file system
+    if (saveToFileSystem) {
+      await saveFileToFileSystem(projectId, fileName, content);
+    }
+
+    res.json({ 
+      success: true, 
+      message: 'File saved successfully',
+      fileName,
+      savedToFileSystem: saveToFileSystem
+    });
+  } catch (error) {
+    console.error('Error saving file:', error);
+    res.status(500).json({ 
+      error: 'Failed to save file',
+      details: error.message 
+    });
+  }
+};
+
+// Helper function to save content to file system
+const saveContentToFileSystem = async (projectId, content) => {
+  const projectDir = path.join(__dirname, '../../storage/builds', projectId);
+  await fs.mkdir(projectDir, { recursive: true });
+
+  // Save each file to the file system
+  for (const [fileName, fileContent] of Object.entries(content)) {
+    const filePath = path.join(projectDir, fileName);
+    const fileDir = path.dirname(filePath);
+    await fs.mkdir(fileDir, { recursive: true });
+    await fs.writeFile(filePath, fileContent, 'utf8');
+  }
+};
+
+// Helper function to save individual file to file system
+const saveFileToFileSystem = async (projectId, fileName, content) => {
+  const projectDir = path.join(__dirname, '../../storage/builds', projectId);
+  const filePath = path.join(projectDir, fileName);
+  const fileDir = path.dirname(filePath);
+  
+  await fs.mkdir(fileDir, { recursive: true });
+  await fs.writeFile(filePath, content, 'utf8');
+};
+
+// Get preview URL for project
+const getPreviewUrl = async (req, res) => {
+  try {
+    const { projectId } = req.params;
+    const userId = req.user.uid;
+
+    const project = await Project.findById(projectId);
+    if (!project || project.userId !== userId) {
+      return res.status(404).json({ error: 'Project not found' });
+    }
+
+    // Check if project has been saved to file system
+    const projectDir = path.join(__dirname, '../../storage/builds', projectId);
+    const indexPath = path.join(projectDir, 'index.html');
+    
+    try {
+      await fs.access(indexPath);
+      const previewUrl = `${req.protocol}://${req.get('host')}/api/enhanced-projects/${projectId}/preview`;
+      const livePreviewUrl = `${req.protocol}://${req.get('host')}/api/enhanced-projects/${projectId}/live-preview`;
+      
+      res.json({
+        success: true,
+        previewUrl,
+        livePreviewUrl,
+        hasFileSystem: true
+      });
+    } catch {
+      res.json({
+        success: true,
+        previewUrl: null,
+        livePreviewUrl: null,
+        hasFileSystem: false,
+        message: 'Project not saved to file system yet'
+      });
+    }
+  } catch (error) {
+    console.error('Error getting preview URL:', error);
+    res.status(500).json({ 
+      error: 'Failed to get preview URL',
+      details: error.message 
+    });
+  }
+};
+
+// Serve static preview
+const servePreview = async (req, res) => {
+  try {
+    const { projectId } = req.params;
+    const { '*': filePath = 'index.html' } = req.params;
+
+    const projectDir = path.join(__dirname, '../../storage/builds', projectId);
+    const requestedFile = path.join(projectDir, filePath);
+
+    // Security check to prevent directory traversal
+    if (!requestedFile.startsWith(projectDir)) {
+      return res.status(403).json({ error: 'Access denied' });
+    }
+
+    try {
+      const content = await fs.readFile(requestedFile, 'utf8');
+      
+      // Set appropriate content type
+      const ext = path.extname(filePath);
+      const contentTypes = {
+        '.html': 'text/html',
+        '.css': 'text/css',
+        '.js': 'application/javascript',
+        '.json': 'application/json'
+      };
+      
+      res.set('Content-Type', contentTypes[ext] || 'text/plain');
+      res.send(content);
+    } catch (error) {
+      res.status(404).json({ error: 'File not found' });
+    }
+  } catch (error) {
+    console.error('Error serving preview:', error);
+    res.status(500).json({ 
+      error: 'Failed to serve preview',
+      details: error.message 
+    });
+  }
+};
+
 module.exports = {
   uploadFiles,
   createProject,
   generateAIAnalysis,
   generateCode,
   getProjectDetails,
-  updateProjectDetails
+  updateProjectDetails,
+  // New AI Core methods
+  generateLiveCode,
+  // Terminal methods
+  createTerminal,
+  executeTerminalCommand,
+  getTerminalOutput,
+  // File system methods
+  getWorkspaceTree,
+  readWorkspaceFile,
+  writeWorkspaceFile,
+  deleteWorkspaceFile,
+  createWorkspaceDirectory,
+  // Package management
+  installPackages,
+  // Build and deployment
+  runBuild,
+  runDevServer,
+  // AI Knowledge Base
+  getKnowledgeStats,
+  // Enhanced save and preview
+  saveProjectContent,
+  saveFileContent,
+  getPreviewUrl,
+  servePreview
 };
