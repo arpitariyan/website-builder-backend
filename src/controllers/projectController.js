@@ -71,6 +71,116 @@ class ProjectController {
     }
   }
 
+  async createEnhancedProject(req, res) {
+    try {
+      const { 
+        name, 
+        description, 
+        category, 
+        projectType,
+        techStack,
+        features,
+        isPublic,
+        figmaUrl,
+        requirements 
+      } = req.body;
+      const userId = req.user.uid;
+
+      if (!name || !name.trim()) {
+        return res.status(400).json({ error: 'Project name is required' });
+      }
+
+      // Parse arrays from FormData if they're strings
+      const parsedTechStack = typeof techStack === 'string' ? JSON.parse(techStack) : techStack;
+      const parsedFeatures = typeof features === 'string' ? JSON.parse(features) : features;
+
+      // Initialize enhanced project data
+      const projectData = {
+        name: name.trim(),
+        description: description || '',
+        userId,
+        category: category || 'web',
+        projectType: projectType || 'website',
+        techStack: parsedTechStack || [],
+        features: parsedFeatures || [],
+        requirements: requirements || '',
+        visibility: isPublic === 'true' || isPublic === true ? 'public' : 'private',
+        status: 'planning',
+        enhanced: true
+      };
+
+      // Handle file uploads
+      if (req.files) {
+        projectData.attachments = {};
+        
+        if (req.files.documentation) {
+          projectData.attachments.documentation = req.files.documentation.map(file => ({
+            filename: file.filename,
+            originalName: file.originalname,
+            path: file.path,
+            size: file.size,
+            uploadedAt: new Date()
+          }));
+        }
+        
+        if (req.files.designFiles) {
+          projectData.attachments.designFiles = req.files.designFiles.map(file => ({
+            filename: file.filename,
+            originalName: file.originalname,
+            path: file.path,
+            size: file.size,
+            uploadedAt: new Date()
+          }));
+        }
+      }
+
+      // Handle Figma integration
+      if (figmaUrl) {
+        try {
+          const figmaData = await figmaService.getFileData(userId, figmaUrl);
+          projectData.figmaData = {
+            figmaUrl,
+            fileKey: figmaData.fileKey,
+            nodeId: figmaData.nodeId,
+            designData: figmaData,
+            lastSync: new Date()
+          };
+        } catch (figmaError) {
+          console.warn('Figma integration failed:', figmaError.message);
+        }
+      }
+
+      const project = new Project(projectData);
+      await project.save();
+
+      // Update user stats
+      await User.findOneAndUpdate(
+        { uid: userId },
+        { $inc: { 'stats.projectsCreated': 1 } }
+      );
+
+      res.status(201).json({
+        success: true,
+        message: 'Enhanced project created successfully',
+        project: {
+          _id: project._id,
+          name: project.name,
+          description: project.description,
+          category: project.category,
+          projectType: project.projectType,
+          techStack: project.techStack,
+          features: project.features,
+          status: project.status,
+          enhanced: project.enhanced,
+          createdAt: project.createdAt
+        }
+      });
+    } catch (error) {
+      console.error('Error creating enhanced project:', error);
+      res.status(500).json({ error: 'Failed to create enhanced project' });
+    }
+  }
+
   async generateCode(req, res) {
     try {
       const { projectId } = req.params;
@@ -181,6 +291,167 @@ class ProjectController {
       console.error('Error in generateCode:', error);
       res.status(500).json({ error: 'Internal server error' });
     }
+  }
+
+  async generateEnhancedCode(req, res) {
+    try {
+      const { projectId } = req.params;
+      const { 
+        prompt, 
+        fileType, 
+        fileName, 
+        targetComponent,
+        includeDatabase = false,
+        provider,
+        options = {} 
+      } = req.body;
+      const userId = req.user.uid;
+
+      if (!prompt) {
+        return res.status(400).json({ error: 'Prompt is required' });
+      }
+
+      const project = await Project.findById(projectId);
+      if (!project) {
+        return res.status(404).json({ error: 'Project not found' });
+      }
+
+      if (project.userId !== userId) {
+        return res.status(403).json({ error: 'Unauthorized' });
+      }
+
+      project.status = 'generating';
+      await project.save();
+
+      try {
+        // Build enhanced context with project data and attachments
+        const enhancedContext = await this.buildEnhancedContext(project, {
+          includeDatabase,
+          fileType,
+          targetComponent
+        });
+
+        // Generate code with enhanced AI service
+        const result = await enhancedAiService.generateCode(userId, prompt, {
+          ...options,
+          context: enhancedContext,
+          projectType: project.projectType,
+          techStack: project.techStack,
+          features: project.features,
+          fileType,
+          fileName,
+          provider: provider || 'openai'
+        });
+
+        // Save generated code to project
+        const codeUpdate = {
+          [`generatedFiles.${fileName || 'index'}`]: {
+            content: result.content,
+            type: fileType || 'javascript',
+            generatedAt: new Date(),
+            prompt: prompt,
+            provider: result.provider,
+            tokensUsed: result.tokensUsed
+          }
+        };
+
+        await Project.findByIdAndUpdate(projectId, {
+          ...codeUpdate,
+          status: 'ready',
+          'aiGeneration.lastGenerated': new Date(),
+          'aiGeneration.provider': result.provider,
+          'aiGeneration.tokensUsed': result.tokensUsed
+        });
+
+        res.json({
+          success: true,
+          message: 'Enhanced code generated successfully',
+          result: {
+            content: result.content,
+            fileName: fileName || 'index',
+            fileType: fileType || 'javascript',
+            provider: result.provider,
+            tokensUsed: result.tokensUsed,
+            suggestions: result.suggestions || []
+          }
+        });
+
+      } catch (aiError) {
+        console.error('Enhanced AI generation failed:', aiError);
+        
+        project.addError(aiError);
+        project.status = 'error';
+        await project.save();
+
+        res.status(500).json({ 
+          error: 'Enhanced code generation failed',
+          details: aiError.message 
+        });
+      }
+
+    } catch (error) {
+      console.error('Error in generateEnhancedCode:', error);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  }
+
+  async buildEnhancedContext(project, options = {}) {
+    const context = {
+      projectInfo: {
+        name: project.name,
+        description: project.description,
+        type: project.projectType,
+        category: project.category,
+        techStack: project.techStack,
+        features: project.features,
+        requirements: project.requirements
+      }
+    };
+
+    // Include existing code if available
+    if (project.content) {
+      context.existingCode = {
+        html: project.content.html,
+        css: project.content.css,
+        js: project.content.js,
+        components: project.content.components
+      };
+    }
+
+    // Include generated files
+    if (project.generatedFiles) {
+      context.generatedFiles = project.generatedFiles;
+    }
+
+    // Include Figma data if available
+    if (project.figmaData && project.figmaData.designData) {
+      context.designData = {
+        figmaUrl: project.figmaData.figmaUrl,
+        screens: project.figmaData.designData.screens || [],
+        components: project.figmaData.designData.components || []
+      };
+    }
+
+    // Include uploaded documentation
+    if (project.attachments && project.attachments.documentation) {
+      // In a real implementation, you'd read and parse the uploaded files
+      context.documentation = project.attachments.documentation.map(doc => ({
+        name: doc.originalName,
+        path: doc.path,
+        uploadedAt: doc.uploadedAt
+      }));
+    }
+
+    // Include database schema if requested
+    if (options.includeDatabase && project.techStack.includes('database')) {
+      // In a real implementation, you'd include database schema information
+      context.database = {
+        type: 'mongodb', // or detect from tech stack
+        schema: 'will be generated based on requirements'
+      };
+    }
+
+    return context;
   }
 
   async generateFromFigma(req, res) {

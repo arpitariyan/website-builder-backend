@@ -30,7 +30,7 @@ const projectSchema = new mongoose.Schema({
   },
   status: {
     type: String,
-    enum: ['draft', 'analyzing', 'ready', 'generating', 'published', 'archived'],
+    enum: ['draft', 'planning', 'analyzing', 'ready', 'generating', 'published', 'archived'],
     default: 'draft'
   },
   visibility: {
@@ -171,6 +171,54 @@ const projectSchema = new mongoose.Schema({
   lastSaved: {
     type: Date,
     default: Date.now
+  },
+  // Enhanced project fields
+  enhanced: {
+    type: Boolean,
+    default: false
+  },
+  projectType: {
+    type: String,
+    enum: ['website', 'web-app', 'mobile-app', 'api', 'desktop-app', 'other'],
+    default: 'website'
+  },
+  techStack: [{
+    type: String
+  }],
+  features: [{
+    type: String
+  }],
+  requirements: {
+    type: String,
+    default: ''
+  },
+  attachments: {
+    documentation: [{
+      filename: String,
+      originalName: String,
+      path: String,
+      size: Number,
+      uploadedAt: { type: Date, default: Date.now }
+    }],
+    designFiles: [{
+      filename: String,
+      originalName: String,
+      path: String,
+      size: Number,
+      uploadedAt: { type: Date, default: Date.now }
+    }]
+  },
+  generatedFiles: {
+    type: Map,
+    of: {
+      content: String,
+      type: String,
+      generatedAt: { type: Date, default: Date.now },
+      prompt: String,
+      provider: String,
+      tokensUsed: Number
+    },
+    default: new Map()
   }
 }, {
   timestamps: true
