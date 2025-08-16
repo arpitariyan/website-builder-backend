@@ -26,12 +26,7 @@ const {
   runBuild,
   runDevServer,
   // AI Knowledge Base
-  getKnowledgeStats,
-  // Enhanced save and preview
-  saveProjectContent,
-  saveFileContent,
-  getPreviewUrl,
-  servePreview
+  getKnowledgeStats
 } = require('../controllers/enhancedProjectController');
 const { authenticateToken } = require('../middleware/auth');
 
@@ -74,14 +69,5 @@ router.post('/:projectId/dev', authenticateToken, runDevServer);
 
 // AI Knowledge Base
 router.get('/knowledge/stats', authenticateToken, getKnowledgeStats);
-
-// Enhanced save functionality
-router.post('/:projectId/save-content', authenticateToken, saveProjectContent);
-router.post('/:projectId/save-file', authenticateToken, saveFileContent);
-
-// Preview functionality
-router.get('/:projectId/preview-url', authenticateToken, getPreviewUrl);
-router.get('/:projectId/preview/*', servePreview);
-router.get('/:projectId/preview', servePreview);
 
 module.exports = router;
