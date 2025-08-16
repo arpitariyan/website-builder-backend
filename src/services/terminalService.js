@@ -123,55 +123,31 @@ class TerminalService {
     }
   }
 
-  // Get or create project workspace directory
+  // Get or create project workspace directory (DISABLED - no physical folders)
   getProjectWorkspace(projectId) {
-    if (this.projectWorkspaces.has(projectId)) {
-      return this.projectWorkspaces.get(projectId);
-    }
-    
-    const workspaceDir = path.join(__dirname, '../../storage/workspaces', projectId);
-    this.projectWorkspaces.set(projectId, workspaceDir);
-    
-    // Ensure directory exists
-    fs.mkdir(workspaceDir, { recursive: true }).catch(console.error);
-    
-    return workspaceDir;
+    // Return a virtual path - no actual folder creation
+    return `/virtual/workspace/${projectId}`;
   }
 
-  // Initialize project workspace with files
+  // Initialize project workspace with files (DISABLED - no physical files)
   async initializeWorkspace(projectId, files) {
-    const workspaceDir = this.getProjectWorkspace(projectId);
-    
-    try {
-      // Ensure workspace directory exists
-      await fs.mkdir(workspaceDir, { recursive: true });
-      
-      // Write all project files to workspace
-      for (const [filePath, fileData] of Object.entries(files)) {
-        const fullPath = path.join(workspaceDir, filePath);
-        const dirPath = path.dirname(fullPath);
-        
-        // Ensure directory exists
-        await fs.mkdir(dirPath, { recursive: true });
-        
-        // Write file content
-        await fs.writeFile(fullPath, fileData.content || '');
-      }
-      
-      console.log(`Workspace initialized for project ${projectId}`);
-      return workspaceDir;
-    } catch (error) {
-      console.error('Error initializing workspace:', error);
-      throw error;
-    }
+    // No longer creates physical files - this is now handled in database only
+    console.log(`Virtual workspace initialized for project ${projectId} (no physical files created)`);
+    return `/virtual/workspace/${projectId}`;
   }
 
-  // Get workspace file tree
+  // Get workspace file tree (from database, not physical files)
   async getWorkspaceTree(projectId) {
-    const workspaceDir = this.getProjectWorkspace(projectId);
-    
     try {
-      return await this.buildFileTree(workspaceDir);
+      // Return virtual file tree - no physical folder scanning
+      return [
+        {
+          name: 'No physical files',
+          type: 'message',
+          path: 'virtual',
+          message: 'Files are stored in database only'
+        }
+      ];
     } catch (error) {
       console.error('Error getting workspace tree:', error);
       return [];
@@ -223,69 +199,32 @@ class TerminalService {
     });
   }
 
-  // Read file from workspace
+  // Read file from workspace (DISABLED - no physical files)
   async readWorkspaceFile(projectId, filePath) {
-    const workspaceDir = this.getProjectWorkspace(projectId);
-    const fullPath = path.join(workspaceDir, filePath);
-    
-    try {
-      const content = await fs.readFile(fullPath, 'utf-8');
-      return { content, path: filePath };
-    } catch (error) {
-      throw new Error(`File not found: ${filePath}`);
-    }
+    // No longer reads physical files - should read from database
+    console.log(`Virtual file read: ${filePath} for project ${projectId}`);
+    return { content: '', path: filePath };
   }
 
-  // Write file to workspace
+  // Write file to workspace (DISABLED - no physical files)
   async writeWorkspaceFile(projectId, filePath, content) {
-    const workspaceDir = this.getProjectWorkspace(projectId);
-    const fullPath = path.join(workspaceDir, filePath);
-    const dirPath = path.dirname(fullPath);
-    
-    try {
-      // Ensure directory exists
-      await fs.mkdir(dirPath, { recursive: true });
-      
-      // Write file
-      await fs.writeFile(fullPath, content);
-      
-      return { success: true, path: filePath };
-    } catch (error) {
-      throw new Error(`Failed to write file: ${filePath}`);
-    }
+    // No longer writes physical files - handled in database only
+    console.log(`Virtual file write: ${filePath} for project ${projectId}`);
+    return { success: true, path: filePath };
   }
 
-  // Delete file from workspace
+  // Delete file from workspace (DISABLED - no physical files)
   async deleteWorkspaceFile(projectId, filePath) {
-    const workspaceDir = this.getProjectWorkspace(projectId);
-    const fullPath = path.join(workspaceDir, filePath);
-    
-    try {
-      const stat = await fs.stat(fullPath);
-      
-      if (stat.isDirectory()) {
-        await fs.rmdir(fullPath, { recursive: true });
-      } else {
-        await fs.unlink(fullPath);
-      }
-      
-      return { success: true, path: filePath };
-    } catch (error) {
-      throw new Error(`Failed to delete: ${filePath}`);
-    }
+    // No longer deletes physical files - handled in database only
+    console.log(`Virtual file delete: ${filePath} for project ${projectId}`);
+    return { success: true, path: filePath };
   }
 
-  // Create directory in workspace
+  // Create directory in workspace (DISABLED - no physical files)
   async createWorkspaceDirectory(projectId, dirPath) {
-    const workspaceDir = this.getProjectWorkspace(projectId);
-    const fullPath = path.join(workspaceDir, dirPath);
-    
-    try {
-      await fs.mkdir(fullPath, { recursive: true });
-      return { success: true, path: dirPath };
-    } catch (error) {
-      throw new Error(`Failed to create directory: ${dirPath}`);
-    }
+    // No longer creates physical directories - handled in database only
+    console.log(`Virtual directory create: ${dirPath} for project ${projectId}`);
+    return { success: true, path: dirPath };
   }
 
   // Install packages in workspace

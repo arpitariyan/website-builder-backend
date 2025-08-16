@@ -216,8 +216,8 @@ class SocketService {
           await new Promise(resolve => setTimeout(resolve, 500));
         }
 
-        // Initialize workspace
-        await terminalService.initializeWorkspace(projectId, result.files);
+        // Initialize workspace (DISABLED - no physical files)
+        // await terminalService.initializeWorkspace(projectId, result.files); // DISABLED
 
         // Update project in database
         project.content = { ...project.content, ...result.files };

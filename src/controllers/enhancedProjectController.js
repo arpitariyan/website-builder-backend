@@ -429,9 +429,9 @@ const generateLiveCode = async (req, res) => {
       category: project.category
     });
 
-    // Initialize workspace with generated files
+    // Initialize workspace with generated files (DISABLED - no physical files)
     if (result.files) {
-      await terminalService.initializeWorkspace(projectId, result.files);
+      // await terminalService.initializeWorkspace(projectId, result.files); // DISABLED
       
       // Update project with generated content
       project.content = result.files;
